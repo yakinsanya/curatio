@@ -201,3 +201,103 @@
       gratuities: u0,
       flags: u0,
     })
+    (var-set aggregate-submissions item-identifier)
+    (print {
+      type: "new-item",
+      item-identifier: item-identifier,
+      originator: tx-sender,
+    })
+    (ok item-identifier)
+  )
+)
+
+;; Appraise content (vote up/down)
+(define-public (appraise-item
+    (item-identifier uint)
+    (appraisal int)
+  )
+  (let (
+      (previous-appraisal (default-to 0
+        (get appraisal
+          (map-get? participant-appraisals {
+            participant: tx-sender,
+            item-identifier: item-identifier,
+          })
+        )))
+      (target-item (unwrap! (map-get? curated-items { item-identifier: item-identifier })
+        ERR_NONEXISTENT_ITEM
+      ))
+      (appraiser-standing (default-to { metric: 0 }
+        (map-get? participant-credibility { participant: tx-sender })
+      ))
+    )
+    (asserts! (item-exists item-identifier) ERR_NONEXISTENT_ITEM)
+    (asserts! (or (is-eq appraisal 1) (is-eq appraisal -1)) ERR_INVALID_APPRAISAL)
+    (map-set participant-appraisals {
+      participant: tx-sender,
+      item-identifier: item-identifier,
+    } { appraisal: appraisal }
+    )
+    (map-set curated-items { item-identifier: item-identifier }
+      (merge target-item { appraisals: (+ (get appraisals target-item) (- appraisal previous-appraisal)) })
+    )
+    (map-set participant-credibility { participant: tx-sender } { metric: (+ (get metric appraiser-standing) appraisal) })
+    (print {
+      type: "appraisal",
+      item-identifier: item-identifier,
+      appraiser: tx-sender,
+      appraisal: appraisal,
+    })
+    (ok true)
+  )
+)
+
+;; Reward content creator with STX
+(define-public (reward-originator
+    (item-identifier uint)
+    (gratuity-amount uint)
+  )
+  (let ((target-item (unwrap! (map-get? curated-items { item-identifier: item-identifier })
+      ERR_NONEXISTENT_ITEM
+    )))
+    (asserts! (item-exists item-identifier) ERR_NONEXISTENT_ITEM)
+    (asserts! (>= (stx-get-balance tx-sender) gratuity-amount)
+      ERR_INADEQUATE_BALANCE
+    )
+    ;; Update before transfer
+    (map-set curated-items { item-identifier: item-identifier }
+      (merge target-item { gratuities: (+ (get gratuities target-item) gratuity-amount) })
+    )
+    ;; Transfer STX
+    (try! (stx-transfer? gratuity-amount tx-sender (get originator target-item)))
+    (print {
+      type: "reward",
+      item-identifier: item-identifier,
+      from: tx-sender,
+      to: (get originator target-item),
+      amount: gratuity-amount,
+    })
+    (ok true)
+  )
+)
+
+;; Flag problematic content
+(define-public (flag-item (item-identifier uint))
+  (let ((target-item (unwrap! (map-get? curated-items { item-identifier: item-identifier })
+      ERR_NONEXISTENT_ITEM
+    )))
+    (asserts! (item-exists item-identifier) ERR_NONEXISTENT_ITEM)
+    (asserts! (not (is-eq (get originator target-item) tx-sender))
+      ERR_INVALID_FLAG
+    )
+    (map-set curated-items { item-identifier: item-identifier }
+      (merge target-item { flags: (+ (get flags target-item) u1) })
+    )
+    (print {
+      type: "flag",
+      item-identifier: item-identifier,
+      flagger: tx-sender,
+    })
+    (ok true)
+  )
+)
