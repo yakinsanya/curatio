@@ -301,3 +301,91 @@
     (ok true)
   )
 )
+
+;; Read-Only Query Functions
+
+(define-read-only (retrieve-item-details (item-identifier uint))
+  (map-get? curated-items { item-identifier: item-identifier })
+)
+
+(define-read-only (retrieve-participant-appraisal
+    (participant principal)
+    (item-identifier uint)
+  )
+  (get appraisal
+    (map-get? participant-appraisals {
+      participant: participant,
+      item-identifier: item-identifier,
+    })
+  )
+)
+
+(define-read-only (retrieve-aggregate-submissions)
+  (var-get aggregate-submissions)
+)
+
+(define-read-only (retrieve-participant-credibility (participant principal))
+  (default-to { metric: 0 }
+    (map-get? participant-credibility { participant: participant })
+  )
+)
+
+(define-read-only (get-item-ids (count uint))
+  (filter is-non-zero (enumerate count))
+)
+
+(define-read-only (retrieve-top-items (limit uint))
+  (let (
+      (item-count (var-get aggregate-submissions))
+      (actual-limit (if (> limit item-count)
+        item-count
+        limit
+      ))
+    )
+    (filter not-none (map retrieve-item-if-valid (get-item-ids actual-limit)))
+  )
+)
+
+;; Administrative Functions
+
+(define-public (adjust-submission-charge (new-charge uint))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_ADMINISTRATOR) ERR_UNAUTHORIZED_ACCESS)
+    (asserts! (<= new-charge MAX_UINT) ERR_OVERFLOW)
+    (var-set submission-charge new-charge)
+    (print {
+      type: "fee-change",
+      new-charge: new-charge,
+    })
+    (ok true)
+  )
+)
+
+(define-public (expunge-item (item-identifier uint))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_ADMINISTRATOR) ERR_UNAUTHORIZED_ACCESS)
+    (asserts! (item-exists item-identifier) ERR_NONEXISTENT_ITEM)
+    (map-delete curated-items { item-identifier: item-identifier })
+    (print {
+      type: "item-expunged",
+      item-identifier: item-identifier,
+    })
+    (ok true)
+  )
+)
+
+(define-public (introduce-topic (new-topic (string-ascii 20)))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_ADMINISTRATOR) ERR_UNAUTHORIZED_ACCESS)
+    (asserts! (< (len (var-get content-topics)) u10) ERR_INVALID_TOPIC)
+    (asserts! (>= (len new-topic) u1) ERR_INVALID_TOPIC)
+    (var-set content-topics
+      (unwrap-panic (as-max-len? (append (var-get content-topics) new-topic) u10))
+    )
+    (print {
+      type: "new-topic",
+      topic: new-topic,
+    })
+    (ok true)
+  )
+)
